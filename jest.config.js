@@ -16,9 +16,14 @@
  * files do not need explicit jest.clearAllMocks()/jest.restoreAllMocks() in
  * afterEach hooks (per AAP 0.10.1).
  *
- * setupFiles loads dotenv/config which populates process.env from a .env file
- * before any test module is required (per AAP 0.5.4 and the canonical pattern
- * documented in AAP 0.2.2).
+ * setupFiles invokes tests/helpers/loadTestEnv.js once per worker BEFORE the
+ * test framework boots. That helper calls dotenv.config({path: <abs path to
+ * tests/fixtures/.env.test>}) so process.env is populated from the project's
+ * deterministic test-environment fixture rather than from a `.env` file at
+ * `process.cwd()`. The previous configuration (`setupFiles: ['dotenv/config']`)
+ * loaded `.env` from cwd by default and therefore did NOT load
+ * `tests/fixtures/.env.test`; this setup file resolves that gap (per AAP
+ * 0.5.4 and the canonical pattern documented in AAP 0.2.2).
  *
  * @see https://jestjs.io/docs/configuration
  */
@@ -41,10 +46,17 @@ module.exports = {
   // -------------------------------------------------------------------------
   // Setup and teardown
   // -------------------------------------------------------------------------
-  // dotenv/config is invoked once per worker BEFORE the test framework boots,
-  // so process.env is populated from .env (or DOTENV_CONFIG_PATH-overridden
-  // .env.test) for every subsequent require().
-  setupFiles: ['dotenv/config'],
+  // tests/helpers/loadTestEnv.js is invoked once per worker BEFORE the test
+  // framework boots. It explicitly calls dotenv.config() with an absolute
+  // path to tests/fixtures/.env.test so that process.env is populated from
+  // the project's deterministic test-environment fixture for every subsequent
+  // require(). The previous shorthand (`setupFiles: ['dotenv/config']`) loaded
+  // `.env` from `process.cwd()` and did NOT load `tests/fixtures/.env.test`,
+  // so the documented intent of having a deterministic baseline was not
+  // actually achieved. The custom setup file resolves this gap in a
+  // cross-platform way without requiring `cross-env` or shell-specific
+  // env-var syntax in npm scripts.
+  setupFiles: ['<rootDir>/tests/helpers/loadTestEnv.js'],
 
   // -------------------------------------------------------------------------
   // Coverage collection

@@ -178,8 +178,10 @@ jest.config.js  - Jest configuration with coverage thresholds
   canonical response payloads. Fixtures are framework-agnostic and reusable
   across unit and integration tests.
 - `tests/helpers/` holds shared utilities such as `buildApp.js` (constructs a
-  fresh Express app for unit tests) and `silenceLogger.js` (replaces Winston's
-  transports with a no-op transport at runtime).
+  fresh Express app for unit tests), `silenceLogger.js` (replaces Winston's
+  transports with a no-op transport at runtime), and `loadTestEnv.js` (the
+  Jest setup file that loads `tests/fixtures/.env.test` into `process.env`
+  via `dotenv.config({ path: ... })` before tests run).
 
 ### Adding New Tests
 
@@ -323,8 +325,26 @@ correctly:
    LOG_LEVEL=silent
    ```
 
-   The file is loaded once per Jest worker via `setupFiles: ['dotenv/config']`
-   in `jest.config.js`, so every test sees a consistent environment.
+   The file is loaded once per Jest worker via the custom setup file
+   `tests/helpers/loadTestEnv.js`, registered under `setupFiles` in
+   `jest.config.js`. That helper resolves the absolute path to
+   `tests/fixtures/.env.test` and calls
+   `dotenv.config({ path: <abs path> })` so that the project's deterministic
+   test-environment fixture is loaded BEFORE any test module is required.
+
+   > **Why a custom setup file rather than the `dotenv/config` shorthand?**
+   > The `dotenv/config` entry point loads `.env` from `process.cwd()` by
+   > default — it does NOT load `tests/fixtures/.env.test`. The custom
+   > setup file targets the fixture explicitly with an absolute path,
+   > which works on every platform without requiring `cross-env` or
+   > shell-specific environment-variable syntax in npm scripts.
+
+   `dotenv.config()` does NOT overwrite values that already exist in
+   `process.env`, so CI runners and developer shells can override any
+   key by exporting it before invoking Jest. Tests that need a
+   *different* environment than `.env.test` (e.g., production-mode
+   tests) follow the canonical capture-and-restore pattern documented
+   in the next section.
 
 2. **No external services are required.** The suite makes zero outbound
    network calls and depends on no databases, caches, message queues, or

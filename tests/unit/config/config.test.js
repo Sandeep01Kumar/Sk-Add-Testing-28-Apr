@@ -321,6 +321,7 @@ describe('Unit: src/config/index.js', () => {
   // Per AAP 0.4.3, the loader must REJECT and throw on:
   //   - PORT='abc'    (non-numeric)
   //   - PORT='-1'     (negative — out of range)
+  //   - PORT='0'      (zero — out of range; valid TCP ports are 1-65535)
   //   - PORT='70000'  (above 65535 — out of range)
   //   - HOST=''       (empty string)
   //
@@ -352,6 +353,28 @@ describe('Unit: src/config/index.js', () => {
       // isolates the non-numeric path — only one bad value at a time.
       process.env = { ...process.env, ...validEnv() };
       process.env.PORT = '-1';
+      expect(() => {
+        // eslint-disable-next-line global-require
+        require('../../../src/config');
+      }).toThrow();
+    });
+
+    it('should throw when PORT is zero (PORT="0")', () => {
+      // Port 0 is a special TCP value: when a server passes 0 to listen(),
+      // the OS assigns an arbitrary unused ("ephemeral") port. That
+      // semantic is incompatible with the application's contract — it
+      // requires a known, predictable port for production deployment,
+      // PM2 process-manager registration, and external health-check
+      // probes. The loader must therefore reject PORT='0' as out of
+      // range (valid TCP ports for application binding are 1-65535).
+      //
+      // This case sits between the non-numeric ('abc') and negative
+      // ('-1') cases above and the above-max ('70000') case below to
+      // give complete edge-of-range coverage on the PORT validator.
+      // Start from validEnv() (all other fields valid) and override
+      // only PORT, isolating the zero-PORT path.
+      process.env = { ...process.env, ...validEnv() };
+      process.env.PORT = '0';
       expect(() => {
         // eslint-disable-next-line global-require
         require('../../../src/config');

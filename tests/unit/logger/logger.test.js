@@ -105,21 +105,24 @@
 //   - loggers      : No-op container so logger modules that do
 //                    `winston.loggers.add(...)` don't throw.
 //
-// Why `{ virtual: true }`:
-//   The `winston` package is documented in AAP 0.6.1 as a RUNTIME
-//   dependency introduced by the broader Express enhancement (not by
-//   this testing AAP). When the broader enhancement has not yet
-//   installed `winston` into node_modules, the default behavior of
-//   jest.mock(moduleName, factory) — which requires the module to be
-//   resolvable on disk — would throw MODULE_NOT_FOUND at mock-
-//   registration time, preventing the test SUITE from even being
-//   loaded by Jest. The `virtual: true` option tells Jest to register
-//   the mock without first attempting to resolve the real module, so
-//   this test file can be parsed, discovered, and (once
-//   src/logger/index.js exists) run successfully even before
-//   `winston` itself is installed. When `winston` IS installed, the
-//   `virtual: true` flag is a no-op and the mock continues to
-//   replace the real package as designed.
+// Mock registration:
+//   `winston` is installed as a runtime dependency (per AAP 0.6.1 and the
+//   project's package.json). Because the package resolves on disk, the
+//   default `jest.mock(moduleName, factory)` form is used WITHOUT the
+//   `{ virtual: true }` option. Using `{ virtual: true }` against an
+//   already-resolvable module causes a subtle worker-pool flakiness: the
+//   virtual mock is keyed by the unresolved name 'winston', but when
+//   another test file in the same Jest worker has already loaded the
+//   REAL winston via `require('winston')`, Node's module cache stores
+//   that real module under its FULLY RESOLVED path
+//   (`<repo>/node_modules/winston/lib/winston.js`). Subsequent requires
+//   from `src/logger/index.js` then resolve to that cached real path
+//   rather than to the virtual mock entry, returning the real winston
+//   even after `jest.resetModules()`. Removing `virtual: true` causes
+//   Jest to register the mock against the resolved path as well, which
+//   correctly intercepts every `require('winston')` regardless of
+//   prior worker state. This is the canonical Jest pattern for mocking
+//   an installed npm package.
 // ---------------------------------------------------------------------------
 jest.mock('winston', () => {
   // Format helpers — return tagged objects so tests can identify which
@@ -220,7 +223,7 @@ jest.mock('winston', () => {
       close: jest.fn(),
     },
   };
-}, { virtual: true });
+});
 
 // ---------------------------------------------------------------------------
 // Top-level imports

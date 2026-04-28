@@ -11,14 +11,15 @@
  *
  * Used by:
  *   - tests/unit/app.test.js (testing the factory itself)
- *   - selected tests/integration/*.test.js files (custom wiring
- *     scenarios that need test-only middleware or routes injected on
- *     top of the standard app build)
+ *   - tests/unit/routes/*.test.js (HTTP-level route tests)
+ *   - tests/integration/*.test.js (full-chain integration tests
+ *     that need test-only middleware or routes injected on top of
+ *     the standard app build)
  *
  * Contract guarantees (per AAP Sections 0.5.2 and 0.10.1):
- *   - Returns a brand-new app instance per invocation — no shared state,
- *     no cached singletons — so tests can be parallelized and run in
- *     arbitrary order without interference.
+ *   - Returns a brand-new app instance per invocation — no shared
+ *     state, no cached singletons — so tests can be parallelized and
+ *     run in arbitrary order without interference.
  *   - NEVER calls `app.listen()` — the helper is strictly a builder.
  *     Callers are expected to pass the returned app to Supertest's
  *     in-process injection (per AAP 0.10.1: "Never call `app.listen()`
@@ -28,9 +29,15 @@
  *     effect before resolution. This is the standard pattern for test
  *     helpers that consume mockable modules.
  *   - Robust to multiple plausible export styles in `src/app.js`
- *     (factory default export, named factory export, ES-module interop,
- *     singleton export) so tests written against this helper remain
- *     stable as the broader Express enhancement evolves.
+ *     (factory default export, named factory export, ES-module interop)
+ *     so tests written against this helper remain stable as the
+ *     broader Express enhancement evolves.
+ *   - Override injection happens INSIDE the factory call (the factory
+ *     receives `overrides` as a parameter), so override middleware and
+ *     routes are registered BEFORE the 404 handler — making them
+ *     reachable. Registering overrides AFTER the factory returns would
+ *     place them AFTER the 404 handler in the middleware chain, where
+ *     they would never run.
  *
  * Conventions (per AAP Section 0.10.1):
  *   - CommonJS `require()`/`module.exports`
@@ -72,30 +79,49 @@
  * Build a fresh, unbound Express app instance for testing.
  *
  * Each invocation lazily resolves the project's Express app factory
- * (`src/app.js`), produces a new app instance, applies any test-only
- * middleware/route overrides supplied by the caller, and returns the
- * result. The function is intentionally tolerant of several plausible
- * export shapes for `src/app.js` so tests remain stable across the
- * broader Express enhancement's chosen export pattern.
+ * (`src/app.js`), invokes it with any caller-supplied overrides, and
+ * returns the resulting app. The function is intentionally tolerant
+ * of several plausible export shapes for `src/app.js` so tests
+ * remain stable across the broader Express enhancement's chosen
+ * export pattern.
  *
- * The returned app is NOT bound to any port; callers are expected to
- * pass it to Supertest (`request(app).get(...)`) or invoke its methods
- * directly. This helper will NEVER call `app.listen()`.
+ * The returned app is NOT bound to any port; callers are expected
+ * to pass it to Supertest (`request(app).get(...)`) or invoke its
+ * methods directly. This helper will NEVER call `app.listen()`.
  *
- * @param {Object} [overrides={}] Optional test-specific overrides.
- * @param {Function[]} [overrides.middleware] Array of Express middleware
- *   functions with the standard `(req, res, next)` signature. Each is
- *   registered on the app via `app.use(mw)` in array order, AFTER the
- *   factory's standard middleware so the test-only behavior layers on
- *   top (and is observed last in the middleware chain).
+ * Override injection is delegated to the factory — overrides are
+ * passed as a parameter to the factory call, NOT applied
+ * post-construction. This is the only correct ordering for two
+ * reasons:
+ *
+ *   1. Reachability: the factory registers a 404 fall-through
+ *      handler at the end of the middleware chain. Overrides
+ *      applied AFTER `factory()` returns would be registered AFTER
+ *      the 404 handler, where they would never run because the 404
+ *      handler terminates with a response.
+ *
+ *   2. Composition: the factory determines the canonical chain
+ *      order (request logger -> standard routes -> overrides ->
+ *      404 -> error handler). Splicing overrides into the chain at
+ *      the correct point requires factory cooperation; doing it
+ *      from the helper would either duplicate the factory's logic
+ *      or be unable to position overrides correctly.
+ *
+ * @param {Object} [overrides={}] Optional test-specific overrides
+ *   forwarded verbatim to the factory.
+ * @param {Function[]} [overrides.middleware] Array of Express
+ *   middleware functions with the standard `(req, res, next)`
+ *   signature. The factory registers each via `app.use(mw)` AFTER
+ *   the standard middleware so the test-only behavior layers on top
+ *   (and is observed last in the middleware chain).
  * @param {Function[]} [overrides.routes] Array of route registrar
- *   callbacks. Each function is invoked with the freshly built app so
- *   custom routes can be registered, e.g.
- *   `(app) => app.get('/__test__', handler)`. Registrars run AFTER the
- *   factory's standard route registration; callers wishing to verify
- *   404 fall-through or error-handler ordering should account for that.
- * @returns {Function} A fresh Express app callable, ready for Supertest
- *   in-process injection. Not bound to any port.
+ *   callbacks. The factory invokes each with the freshly built app
+ *   so custom routes can be registered, e.g.
+ *   `(app) => app.get('/__test__', handler)`. Registrars run AFTER
+ *   the factory's standard route registration but BEFORE the 404
+ *   handler.
+ * @returns {Function} A fresh Express app callable, ready for
+ *   Supertest in-process injection. Not bound to any port.
  */
 function buildApp(overrides = {}) {
   // ---------------------------------------------------------------------
@@ -112,72 +138,48 @@ function buildApp(overrides = {}) {
   const appModule = require('../../src/app');
 
   // ---------------------------------------------------------------------
-  // Resolve a fresh Express app instance regardless of export style
+  // Resolve a fresh Express app instance via the factory
   // ---------------------------------------------------------------------
   // The broader Express enhancement may use any of several plausible
-  // export shapes for `src/app.js`. Supporting all of them here means
-  // tests written against this helper remain stable regardless of the
-  // chosen pattern. Resolution order is intentional — most-specific
-  // (factory functions) checked before least-specific (singleton).
+  // factory export shapes. Supporting all of them here means tests
+  // written against this helper remain stable regardless of the chosen
+  // pattern. Resolution order is intentional — most-specific (callable
+  // module) checked first, ES-module interop fallback last.
   //
   //   Style A: module.exports = createApp;
-  //            (factory default — call appModule() directly)
+  //            (factory default — call appModule(overrides) directly)
   //   Style B: module.exports = { createApp };
-  //            (named factory export — call appModule.createApp())
+  //            (named factory export — call
+  //             appModule.createApp(overrides))
   //   Style C: module.exports = { default: createApp };
-  //            (ES-module interop fallback — call appModule.default();
-  //             unlikely given the project is CommonJS, but defensive
-  //             against future bundler-emitted shapes)
-  //   Style D: module.exports = app;
-  //            (singleton fallback — defensive only; does not satisfy
-  //             the fresh-per-call guarantee, but preserves test
-  //             functionality if `src/app.js` is restructured to a
-  //             singleton-style export.)
+  //            (ES-module interop fallback — call
+  //             appModule.default(overrides); unlikely given the project
+  //             is CommonJS, but defensive against future
+  //             bundler-emitted shapes)
+  //   Style D: module.exports = app;  (singleton — defensive only;
+  //            does not satisfy the fresh-per-call guarantee, but
+  //            preserves test functionality if `src/app.js` is
+  //            restructured to a singleton-style export. Overrides are
+  //            ignored in this case because there is no factory to
+  //            forward them to.)
   //
-  // `let` (not `const`) is required here because the binding is assigned
-  // in any one of four mutually exclusive branches.
+  // CRITICAL: each branch passes `overrides` to the factory call so the
+  // factory can register override middleware/routes BEFORE the 404
+  // handler, keeping them reachable. Applying overrides
+  // post-construction (after the factory returns) would register them
+  // AFTER the 404 handler, where they would never run.
   let app;
   if (typeof appModule === 'function') {
-    app = appModule();
+    app = appModule(overrides);
   } else if (appModule && typeof appModule.createApp === 'function') {
-    app = appModule.createApp();
+    app = appModule.createApp(overrides);
   } else if (appModule && typeof appModule.default === 'function') {
-    app = appModule.default();
+    app = appModule.default(overrides);
   } else {
+    // Singleton fallback — overrides cannot be honored because there is
+    // no factory to forward them to. We still return the app so tests
+    // that DON'T use overrides continue to work.
     app = appModule;
-  }
-
-  // ---------------------------------------------------------------------
-  // Apply optional middleware overrides
-  // ---------------------------------------------------------------------
-  // `Array.isArray` (rather than a truthy check) correctly rejects
-  // strings, objects, and other accidental truthy non-array values that
-  // a `if (overrides.middleware)` test would erroneously accept.
-  //
-  // Arrow-function wrapping is intentional — passing `app.use` as the
-  // direct iteratee (`forEach(app.use)`) would lose the `this` binding
-  // and is brittle across Express versions and prototypes.
-  if (Array.isArray(overrides.middleware)) {
-    overrides.middleware.forEach((mw) => {
-      app.use(mw);
-    });
-  }
-
-  // ---------------------------------------------------------------------
-  // Apply optional route registrars
-  // ---------------------------------------------------------------------
-  // Each registrar is a function that receives the app and may register
-  // custom routes:
-  //
-  //   (app) => app.get('/__test__', (req, res) => res.json({ ok: true }))
-  //
-  // This pattern keeps the helper agnostic to specific HTTP methods and
-  // path shapes — each registrar owns its own registration logic and
-  // can register multiple routes per registrar if desired.
-  if (Array.isArray(overrides.routes)) {
-    overrides.routes.forEach((registerFn) => {
-      registerFn(app);
-    });
   }
 
   // ---------------------------------------------------------------------
@@ -186,6 +188,7 @@ function buildApp(overrides = {}) {
   // No `app.listen()` call, no caching, no module-level shared state.
   // Each `buildApp()` invocation produces an independent app instance
   // suitable for parallel test execution and arbitrary test ordering.
+  // Override injection has already been performed inside the factory.
   return app;
 }
 

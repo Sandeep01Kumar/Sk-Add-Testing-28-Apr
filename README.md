@@ -7,10 +7,10 @@ deliberately minimal fixture used to exercise backprop integration scenarios;
 the testing infrastructure documented below validates the post-enhancement
 Express architecture.
 
-> **Note:** Earlier revisions of this README contained a *"Do not touch!"*
-> directive reflecting a frozen-baseline state. That directive has been
-> superseded by the introduction of comprehensive testing infrastructure and
-> the broader Express enhancement. Contributions and modifications are now
+> **Note:** Earlier revisions of this README contained a frozen-baseline
+> directive reflecting a "do-not-modify" governance state. That directive has
+> been superseded by the introduction of comprehensive testing infrastructure
+> and the broader Express enhancement. Contributions and modifications are now
 > expected to follow the testing patterns documented below.
 
 ---
@@ -199,8 +199,12 @@ src/routes/health.js            →  tests/unit/routes/health.test.js
 src/config/index.js             →  tests/unit/config/config.test.js
 ```
 
-This naming aligns with Jest's default `testMatch` pattern
-(`**/tests/**/*.test.js`).
+This naming aligns with the project's configured `testMatch` pattern in
+[`jest.config.js`](https://jestjs.io/docs/configuration#testmatch-arraystring)
+(`**/tests/**/*.test.js`). Jest's own out-of-the-box defaults are
+`**/__tests__/**/*.[jt]s?(x)` and `**/?(*.)+(spec|test).[jt]s?(x)`; the
+project narrows discovery to `tests/**/*.test.js` so that fixtures and
+helpers (which lack the `.test.js` suffix) are intentionally NOT matched.
 
 #### 2. Block Structure
 
@@ -400,6 +404,63 @@ can be cleaned up in the test's `afterEach` or `afterAll` hook.
 ```bash
 npx jest tests/unit/middleware
 ```
+
+---
+
+## References
+
+Authoritative external documentation for every tool and framework referenced
+above. Each link points at the canonical project home, package registry entry,
+or configuration reference used to drive the choices documented in this README.
+
+### Test framework and HTTP testing
+
+- [Jest — official documentation](https://jestjs.io) — runner, assertions,
+  mocking, and coverage. The configuration reference used by this repository's
+  `jest.config.js` is at
+  [jestjs.io/docs/configuration](https://jestjs.io/docs/configuration).
+- [Jest — `expect` matchers](https://jestjs.io/docs/expect) — full matcher
+  catalogue (`toBe`, `toEqual`, `toHaveBeenCalledWith`, `toMatchObject`, etc.).
+- [Jest — mocking guide](https://jestjs.io/docs/mock-functions) — `jest.fn()`,
+  `jest.mock()`, `jest.spyOn()` patterns used across this suite.
+- [Supertest — GitHub repository](https://github.com/ladjs/supertest) —
+  in-process HTTP assertion against the Express `app` callable.
+- [Supertest — npm package](https://www.npmjs.com/package/supertest) — version
+  history and install instructions.
+- [`@jest-mock/express` — npm package](https://www.npmjs.com/package/@jest-mock/express)
+  — convenience helpers (`getMockReq()`, `getMockRes()`) for unit-testing
+  Express middleware.
+
+### Production runtime dependencies
+
+- [Express.js — official documentation](https://expressjs.com) — application
+  factory, routing, middleware, and Express 5 migration notes
+  ([expressjs.com/en/guide/migrating-5.html](https://expressjs.com/en/guide/migrating-5.html)).
+- [Express.js — npm package](https://www.npmjs.com/package/express) — install
+  instructions and dependency graph.
+- [`dotenv` — GitHub repository](https://github.com/motdotla/dotenv) —
+  environment-variable loading from `.env` files (used by
+  `tests/helpers/loadTestEnv.js` to load `tests/fixtures/.env.test`).
+- [`dotenv` — npm package](https://www.npmjs.com/package/dotenv).
+- [Winston — GitHub repository](https://github.com/winstonjs/winston) —
+  structured logger with environment-conditional transports.
+- [Winston — npm package](https://www.npmjs.com/package/winston).
+
+### Production deployment
+
+- [PM2 — official documentation](https://pm2.keymetrics.io) — production
+  process manager. Ecosystem-file reference at
+  [pm2.keymetrics.io/docs/usage/application-declaration/](https://pm2.keymetrics.io/docs/usage/application-declaration/).
+- [PM2 — npm package](https://www.npmjs.com/package/pm2).
+
+### Runtime environment
+
+- [Node.js — official documentation](https://nodejs.org) — runtime APIs
+  (`http`, `process`, modules) used by the application and tests.
+- [npm CLI — `npm ci` reference](https://docs.npmjs.com/cli/v11/commands/npm-ci)
+  — deterministic, lockfile-driven install used by CI.
+- [npm CLI — `npm install` reference](https://docs.npmjs.com/cli/v11/commands/npm-install)
+  — local-development install command.
 
 ---
 

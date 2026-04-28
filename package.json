@@ -2,10 +2,27 @@
     "name": "hello_world",
     "version": "1.0.0",
     "description": "Hello world in Node.js",
-    "main": "index.js",
+    "main": "src/server.js",
     "scripts": {
-        "test": "echo \"Error: no test specified\" && exit 1"
+        "start": "node src/server.js",
+        "test": "jest",
+        "test:watch": "jest --watch",
+        "test:coverage": "jest --coverage",
+        "test:ci": "jest --ci --coverage --watchAll=false --maxWorkers=2"
+    },
+    "engines": {
+        "node": ">=20.20.2"
     },
     "author": "hxu",
-    "license": "MIT"
+    "license": "MIT",
+    "dependencies": {
+        "dotenv": "^16.4.5",
+        "express": "^5.1.0",
+        "winston": "^3.13.0"
+    },
+    "devDependencies": {
+        "@jest-mock/express": "^3.0.0",
+        "jest": "^30.0.0",
+        "supertest": "^7.0.0"
+    }
 }
